@@ -1,0 +1,11 @@
+{
+  "_comment": "Example Claude Desktop configuration. To use the FDC MCP server with Claude Desktop: 1) build the project (npm install && npm run build), 2) add this server block to your Claude Desktop config file (macOS: ~/Library/Application Support/Claude/claude_desktop_config.json, Windows: %APPDATA%\\Claude\\claude_desktop_config.json), 3) replace ABSOLUTE_PATH_TO_FDC_MCP with the full path to your local clone, 4) restart Claude Desktop. The server's 4 tools will appear in the tools picker.",
+  "mcpServers": {
+    "fdc-property-finance": {
+      "command": "node",
+      "args": [
+        "ABSOLUTE_PATH_TO_FDC_MCP/dist/index-stdio.js"
+      ]
+    }
+  }
+}

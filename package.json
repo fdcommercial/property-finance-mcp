@@ -1,0 +1,62 @@
+{
+  "name": "@fdcommercial/property-finance-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing UK property finance calculators from FD Commercial. Bridging cost analysis, development appraisal, BTL stress testing, stamp duty (SDLT/LBTT/LTT).",
+  "type": "module",
+  "bin": {
+    "fdc-mcp": "./dist/index-stdio.js"
+  },
+  "main": "./dist/index-stdio.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev:stdio": "tsx src/index-stdio.ts",
+    "dev:http": "tsx src/index-http.ts",
+    "start": "node dist/index-stdio.js",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index-stdio.js",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "property-finance",
+    "bridging-loan",
+    "uk-property",
+    "stamp-duty",
+    "sdlt",
+    "btl",
+    "development-finance",
+    "fd-commercial"
+  ],
+  "author": {
+    "name": "FD Commercial & Bridging Ltd",
+    "email": "hello@fdcommercial.co.uk",
+    "url": "https://www.fdcommercial.co.uk"
+  },
+  "homepage": "https://www.fdcommercial.co.uk/property-finance-tools/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fdcommercial/property-finance-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fdcommercial/property-finance-mcp/issues"
+  },
+  "license": "MIT"
+}
