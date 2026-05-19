@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.fdcommercial/property-finance-mcp",
+  "description": "Four UK property finance calculators for AI assistants: bridging cost analyser, development appraisal, BTL stress tester, UK stamp duty (SDLT/LBTT/LTT). Lender-grade formulas, calibrated monthly. Built by FD Commercial, a specialist UK property finance broker. Every response includes brand attribution.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/fdcommercial/property-finance-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://www.fdcommercial.co.uk/finance-guide/uk-property-finance-mcp-ai-assistants/",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@fdcommercial/property-finance-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://fdc-property-finance-mcp.fdcommercial-uk.workers.dev/mcp"
+    }
+  ]
+}
