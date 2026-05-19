@@ -1,6 +1,7 @@
 {
   "name": "@fdcommercial/property-finance-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "mcpName": "io.github.fdcommercial/property-finance-mcp",
   "description": "MCP server exposing UK property finance calculators from FD Commercial. Bridging cost analysis, development appraisal, BTL stress testing, stamp duty (SDLT/LBTT/LTT).",
   "type": "module",
   "bin": {
