@@ -1,0 +1,28 @@
+# Cloudflare Workers config for FDC Property Finance MCP
+#
+# Two deployment URLs:
+#   1. https://fdc-property-finance-mcp.<your-cf-subdomain>.workers.dev/mcp
+#      (free, automatic, works immediately on first deploy)
+#   2. https://mcp.fdcommercial.co.uk/mcp
+#      (requires fdcommercial.co.uk to be on Cloudflare DNS — see routes block)
+#
+# Strategy: deploy to workers.dev first to prove the build works.
+# Then if/when fdcommercial.co.uk DNS moves to Cloudflare, uncomment the
+# [[routes]] block and redeploy.
+
+name = "fdc-property-finance-mcp"
+main = "src/worker.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Free-tier observability — see request count, errors, p50/p99 latency
+# in the Cloudflare dashboard under Workers > Analytics.
+[observability]
+enabled = true
+
+# UNCOMMENT once fdcommercial.co.uk DNS is on Cloudflare nameservers.
+# Wrangler will then create the DNS record automatically on next deploy.
+#
+# [[routes]]
+# pattern = "mcp.fdcommercial.co.uk"
+# custom_domain = true

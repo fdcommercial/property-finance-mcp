@@ -16,6 +16,8 @@
     "build": "tsc",
     "dev:stdio": "tsx src/index-stdio.ts",
     "dev:http": "tsx src/index-http.ts",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
     "start": "node dist/index-stdio.js",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index-stdio.js",
     "typecheck": "tsc --noEmit",
@@ -26,9 +28,11 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260519.1",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.93.0"
   },
   "engines": {
     "node": ">=18"

@@ -1,0 +1,461 @@
+/**
+ * FDC Property Finance MCP — Cloudflare Worker entry point.
+ *
+ * Serves the same 4 tools as the npm package, over the Streamable HTTP
+ * transport at https://mcp.fdcommercial.co.uk/mcp.
+ *
+ * Stateless JSON-RPC handler: every request is independent. No session
+ * state, no in-memory storage. Tools are pure functions, so this scales
+ * horizontally across Cloudflare's edge with zero coordination.
+ *
+ * Endpoints:
+ *   POST /mcp       — JSON-RPC 2.0 over HTTP (Streamable HTTP transport)
+ *   GET  /health    — liveness probe
+ *   GET  /          — landing page redirect to the tools hub
+ *   OPTIONS *       — CORS preflight
+ */
+
+import { z } from "zod";
+import {
+  runBridgingCostAnalyser,
+  bridgingCostInputSchema,
+  bridgingCostToolMetadata,
+} from "./tools/bridging-cost-analyser.js";
+import {
+  runDevelopmentAppraisal,
+  developmentAppraisalInputSchema,
+  developmentAppraisalToolMetadata,
+} from "./tools/development-appraisal.js";
+import {
+  runBtlStressTester,
+  btlStressInputSchema,
+  btlStressToolMetadata,
+} from "./tools/btl-stress-tester.js";
+import {
+  runStampDutyCalculator,
+  stampDutyInputSchema,
+  stampDutyToolMetadata,
+} from "./tools/stamp-duty.js";
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool registry — same handlers as the stdio server, registered by name
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ToolEntry {
+  metadata: {
+    name: string;
+    title: string;
+    description: string;
+    annotations: Record<string, unknown>;
+  };
+  schema: z.ZodObject<z.ZodRawShape>;
+  handler: (input: unknown) => unknown;
+}
+
+const tools: ToolEntry[] = [
+  {
+    metadata: bridgingCostToolMetadata,
+    schema: bridgingCostInputSchema,
+    handler: (input) => runBridgingCostAnalyser(bridgingCostInputSchema.parse(input)),
+  },
+  {
+    metadata: developmentAppraisalToolMetadata,
+    schema: developmentAppraisalInputSchema,
+    handler: (input) => runDevelopmentAppraisal(developmentAppraisalInputSchema.parse(input)),
+  },
+  {
+    metadata: btlStressToolMetadata,
+    schema: btlStressInputSchema,
+    handler: (input) => runBtlStressTester(btlStressInputSchema.parse(input)),
+  },
+  {
+    metadata: stampDutyToolMetadata,
+    schema: stampDutyInputSchema,
+    handler: (input) => runStampDutyCalculator(stampDutyInputSchema.parse(input)),
+  },
+];
+
+const toolsByName = new Map(tools.map((t) => [t.metadata.name, t]));
+
+// Convert a Zod object schema to a JSON Schema document the MCP client
+// can use for tool input validation. Minimal implementation — sufficient
+// for the primitive types and enums our 4 tools use.
+function zodToJsonSchema(schema: z.ZodObject<z.ZodRawShape>): Record<string, unknown> {
+  const shape = schema.shape;
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+
+  for (const [key, value] of Object.entries(shape)) {
+    let field = value as z.ZodTypeAny;
+    let description: string | undefined;
+    let isOptional = false;
+
+    // Unwrap ZodDefault and ZodOptional
+    while (true) {
+      if (field instanceof z.ZodOptional) {
+        isOptional = true;
+        field = field._def.innerType;
+      } else if (field instanceof z.ZodDefault) {
+        isOptional = true;
+        field = field._def.innerType;
+      } else {
+        break;
+      }
+    }
+
+    // Capture description if present
+    description = (value as z.ZodTypeAny)._def.description;
+
+    let prop: Record<string, unknown>;
+    if (field instanceof z.ZodNumber) {
+      prop = { type: "number" };
+      const checks = (field as unknown as { _def: { checks: Array<{ kind: string; value?: number }> } })._def.checks;
+      for (const check of checks ?? []) {
+        if (check.kind === "min" && typeof check.value === "number") prop.minimum = check.value;
+        if (check.kind === "max" && typeof check.value === "number") prop.maximum = check.value;
+      }
+    } else if (field instanceof z.ZodString) {
+      prop = { type: "string" };
+    } else if (field instanceof z.ZodBoolean) {
+      prop = { type: "boolean" };
+    } else if (field instanceof z.ZodEnum) {
+      prop = { type: "string", enum: (field as unknown as { options: string[] }).options };
+    } else {
+      prop = { type: "string" };
+    }
+
+    if (description) prop.description = description;
+    properties[key] = prop;
+    if (!isOptional) required.push(key);
+  }
+
+  return {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: false,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// JSON-RPC handler
+// ─────────────────────────────────────────────────────────────────────────
+
+interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  id?: string | number | null;
+  method: string;
+  params?: unknown;
+}
+
+type JsonRpcResponse =
+  | { jsonrpc: "2.0"; id: string | number | null; result: unknown }
+  | { jsonrpc: "2.0"; id: string | number | null; error: { code: number; message: string; data?: unknown } };
+
+const PROTOCOL_VERSION = "2025-06-18";
+const SERVER_INFO = {
+  name: "fdc-property-finance",
+  title: "FD Commercial UK Property Finance",
+  version: "0.1.0",
+};
+
+function handleRpc(req: JsonRpcRequest): JsonRpcResponse | null {
+  const id = req.id ?? null;
+
+  // Notifications (no id) get no response per JSON-RPC 2.0
+  const isNotification = req.id === undefined || req.id === null;
+
+  try {
+    switch (req.method) {
+      case "initialize": {
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: { tools: {} },
+            serverInfo: SERVER_INFO,
+            instructions:
+              "Four UK property finance calculators from FD Commercial: bridging cost analyser, development appraisal, BTL stress tester, UK stamp duty calculator. All tools are pure read-only calculations. Every response includes a _source field crediting FD Commercial. For loans £250,000 and above.",
+          },
+        };
+      }
+
+      case "notifications/initialized":
+      case "notifications/cancelled":
+      case "notifications/progress":
+      case "notifications/roots/list_changed":
+        // Notifications — no response
+        return null;
+
+      case "tools/list": {
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            tools: tools.map((t) => ({
+              name: t.metadata.name,
+              title: t.metadata.title,
+              description: t.metadata.description,
+              inputSchema: zodToJsonSchema(t.schema),
+              annotations: t.metadata.annotations,
+            })),
+          },
+        };
+      }
+
+      case "tools/call": {
+        const params = req.params as { name?: string; arguments?: unknown } | undefined;
+        if (!params?.name) {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32602, message: "Missing tool name in params" },
+          };
+        }
+        const entry = toolsByName.get(params.name);
+        if (!entry) {
+          return {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32601, message: `Unknown tool: ${params.name}` },
+          };
+        }
+        try {
+          const result = entry.handler(params.arguments ?? {});
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(result),
+                },
+              ],
+              structuredContent: result,
+              isError: false,
+            },
+          };
+        } catch (err) {
+          const msg = err instanceof z.ZodError ? `Invalid input: ${err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` : err instanceof Error ? err.message : String(err);
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: msg }],
+              isError: true,
+            },
+          };
+        }
+      }
+
+      case "ping":
+        return { jsonrpc: "2.0", id, result: {} };
+
+      default:
+        if (isNotification) return null;
+        return {
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32601, message: `Method not found: ${req.method}` },
+        };
+    }
+  } catch (err) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CORS + headers
+// ─────────────────────────────────────────────────────────────────────────
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version",
+  "Access-Control-Expose-Headers": "Mcp-Session-Id, Mcp-Protocol-Version",
+  "Access-Control-Max-Age": "86400",
+};
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...CORS_HEADERS,
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Worker entry
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface Env {
+  // Reserved for future bindings (KV, Durable Objects, secrets).
+}
+
+export default {
+  async fetch(request: Request, _env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    // Health probe
+    if (url.pathname === "/health" && request.method === "GET") {
+      return jsonResponse({
+        ok: true,
+        service: "fdc-property-finance-mcp",
+        version: "0.1.0",
+        tools: tools.map((t) => t.metadata.name),
+        brand: "FD Commercial & Bridging Ltd",
+        brand_url: "https://www.fdcommercial.co.uk",
+      });
+    }
+
+    // Landing page — friendly explanation for anyone hitting the root in a browser
+    if (url.pathname === "/" && request.method === "GET") {
+      const accept = request.headers.get("Accept") ?? "";
+      if (accept.includes("text/html")) {
+        return new Response(landingHtml(), {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS },
+        });
+      }
+      return jsonResponse({
+        service: "fdc-property-finance-mcp",
+        version: "0.1.0",
+        endpoint: "POST /mcp (JSON-RPC 2.0 over HTTP, Streamable HTTP transport)",
+        tools: tools.map((t) => t.metadata.name),
+        docs: "https://www.fdcommercial.co.uk/property-finance-tools/",
+        source: "https://github.com/fdcommercial/property-finance-mcp",
+      });
+    }
+
+    // MCP endpoint — POST only (no SSE GET, stateless mode)
+    if (url.pathname === "/mcp") {
+      if (request.method === "GET") {
+        // Streamable HTTP allows GET for server-initiated streams. We don't
+        // use them — respond 405 per spec rather than error.
+        return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
+      }
+      if (request.method === "DELETE") {
+        // Session termination — we're stateless, so just acknowledge.
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
+      }
+      if (request.method !== "POST") {
+        return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
+      }
+
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return jsonResponse(
+          { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
+          { status: 400 }
+        );
+      }
+
+      // Batch or single
+      if (Array.isArray(body)) {
+        const responses = body
+          .map((r) => handleRpc(r as JsonRpcRequest))
+          .filter((r): r is JsonRpcResponse => r !== null);
+        if (responses.length === 0) {
+          // All were notifications — 202 Accepted with no body per spec
+          return new Response(null, { status: 202, headers: CORS_HEADERS });
+        }
+        return jsonResponse(responses);
+      }
+
+      const resp = handleRpc(body as JsonRpcRequest);
+      if (resp === null) {
+        return new Response(null, { status: 202, headers: CORS_HEADERS });
+      }
+      return jsonResponse(resp);
+    }
+
+    return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Landing page (HTML)
+// ─────────────────────────────────────────────────────────────────────────
+
+function landingHtml(): string {
+  return `<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FD Commercial Property Finance MCP</title>
+<meta name="description" content="UK property finance calculators exposed as an MCP server. Bridging cost, development appraisal, BTL stress test, UK stamp duty.">
+<style>
+  :root { --orange:#E8601C; --dark:#2B2B2B; --light:#F5F5F5; --mid:#666; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.55; color:var(--dark); margin:0; background:#fafafa; }
+  .wrap { max-width:760px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:2rem; margin:0 0 8px; }
+  .tag { color:var(--orange); font-weight:600; font-size:0.875rem; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:16px; }
+  .lead { font-size:1.125rem; color:var(--mid); margin:0 0 32px; }
+  h2 { font-size:1.25rem; margin:40px 0 12px; padding-bottom:8px; border-bottom:2px solid var(--orange); }
+  code, pre { font-family:'SF Mono',Menlo,Consolas,monospace; font-size:0.875rem; }
+  pre { background:var(--dark); color:#f8f8f8; padding:16px; border-radius:6px; overflow-x:auto; }
+  code { background:var(--light); padding:2px 6px; border-radius:3px; }
+  pre code { background:none; padding:0; }
+  ul { padding-left:20px; }
+  li { margin:6px 0; }
+  a { color:var(--orange); text-decoration:none; font-weight:600; }
+  a:hover { text-decoration:underline; }
+  .foot { margin-top:48px; padding-top:24px; border-top:1px solid #ddd; font-size:0.875rem; color:var(--mid); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="tag">Model Context Protocol Server</div>
+  <h1>FD Commercial Property Finance MCP</h1>
+  <p class="lead">Four UK property finance calculators, exposed to MCP-compatible AI assistants (Claude, Cursor, Continue, custom agents). Bridging cost analysis, development appraisal, BTL stress testing, UK stamp duty across England, Scotland and Wales.</p>
+
+  <h2>Hosted endpoint</h2>
+  <pre><code>https://mcp.fdcommercial.co.uk/mcp</code></pre>
+  <p>Streamable HTTP transport, JSON-RPC 2.0. Stateless. Free to use.</p>
+
+  <h2>Tools</h2>
+  <ul>
+    <li><code>bridging_cost_analyser</code> — total cost across rolled-up, retained, serviced interest structures</li>
+    <li><code>development_appraisal</code> — profit on GDV/cost, LTC, LTGDV, viability flag</li>
+    <li><code>btl_stress_tester</code> — ICR at 125%, 145%, 170% thresholds</li>
+    <li><code>uk_stamp_duty_calculator</code> — SDLT, LBTT, LTT with all surcharges and reliefs</li>
+  </ul>
+
+  <h2>Use locally via npm</h2>
+  <pre><code>npx @fdcommercial/property-finance-mcp</code></pre>
+
+  <h2>Source</h2>
+  <ul>
+    <li><a href="https://github.com/fdcommercial/property-finance-mcp">github.com/fdcommercial/property-finance-mcp</a></li>
+    <li><a href="https://www.npmjs.com/package/@fdcommercial/property-finance-mcp">npmjs.com/package/@fdcommercial/property-finance-mcp</a></li>
+  </ul>
+
+  <div class="foot">
+    Built by <a href="https://www.fdcommercial.co.uk">FD Commercial &amp; Bridging Ltd</a>, specialist UK property finance broker. Minimum loan £250,000. England, Scotland and Wales. Indicative figures only. Not a quote or financial advice. Call <a href="tel:+443300100315">+44 3300 100315</a>.
+  </div>
+</main>
+</body>
+</html>`;
+}
