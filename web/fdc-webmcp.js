@@ -82,6 +82,10 @@
       required: ['loan_amount_gbp', 'monthly_interest_rate_pct', 'term_months'],
       additionalProperties: false,
     },
+    annotations: {
+      readOnlyHint: true,
+      untrustedContentHint: false,
+    },
     async execute(input) {
       const loan = input.loan_amount_gbp;
       const r = input.monthly_interest_rate_pct / 100;
@@ -138,6 +142,8 @@
               ' interest) is £' +
               Math.round(totalCost).toLocaleString() +
               '.',
+            interest_structure_note:
+              'Rolled-up interest is the most expensive of the three structures (interest compounds monthly and is paid at exit) but it is the easiest to manage because no monthly payments are due. Retained interest is the cheapest in headline terms but reduces the net loan advance because the interest is deducted upfront. Serviced interest requires reliable monthly cash flow from the borrower and is uncommon on regulated bridging.',
             when_to_call:
               'Rates above are indicative. Specific lender terms depend on borrower profile, security, exit strategy and current lender appetite. Call FD Commercial for indicative terms on this case.',
           },
@@ -173,6 +179,10 @@
       },
       required: ['gdv_gbp', 'land_or_purchase_price_gbp', 'build_cost_gbp'],
       additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: true,
+      untrustedContentHint: false,
     },
     async execute(input) {
       const gdv = input.gdv_gbp;
@@ -258,6 +268,10 @@
       required: ['monthly_rent_gbp', 'loan_amount_gbp', 'product_rate_pct'],
       additionalProperties: false,
     },
+    annotations: {
+      readOnlyHint: true,
+      untrustedContentHint: false,
+    },
     async execute(input) {
       const rate = input.product_rate_pct / 100;
       const annualRent = input.monthly_rent_gbp * 12;
@@ -301,7 +315,7 @@
               'ICR results are mathematical. Real lender approval depends on credit profile, top-slicing, portfolio stress (4+ properties), and current lender appetite. FD Commercial arranges UK BTL from £250,000 including HMO and MUFB.',
           },
         },
-        _source: source('semi-commercial-mortgage-calculator'),
+        _source: source('buy-to-let-mortgages'),
       };
     },
   });
@@ -378,6 +392,10 @@
       },
       required: ['property_price_gbp', 'jurisdiction'],
       additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: true,
+      untrustedContentHint: false,
     },
     async execute(input) {
       const price = input.property_price_gbp;
