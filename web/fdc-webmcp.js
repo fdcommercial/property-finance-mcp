@@ -2,7 +2,7 @@
  * FDC Property Finance — WebMCP browser script.
  *
  * Registers four UK property finance calculator tools via the WebMCP
- * navigator.modelContext API. Browser-based AI agents (Gemini in Chrome,
+ * document.modelContext API (navigator.modelContext fallback for Chrome 149-151). Browser-based AI agents (Gemini in Chrome,
  * Chrome auto-browse, the Model Context Tool Inspector extension, and
  * any future MCP-compatible browser agent) can discover and invoke these
  * tools directly from any page on fdcommercial.co.uk.
@@ -18,7 +18,7 @@
  *
  * Load globally via Bricks Custom Code or wp_enqueue_scripts so the
  * tools auto-register on every page. Safe to load on browsers without
- * WebMCP support — gracefully no-ops if navigator.modelContext is
+ * WebMCP support — gracefully no-ops if modelContext is
  * unavailable.
  *
  * Spec: https://developer.chrome.com/docs/ai/webmcp
@@ -30,7 +30,9 @@
   'use strict';
 
   // Graceful degradation: do nothing on browsers without WebMCP support.
-  if (typeof navigator === 'undefined' || !navigator.modelContext || typeof navigator.modelContext.registerTool !== 'function') {
+  var mc = (typeof document !== 'undefined' && document.modelContext) ||
+           (typeof navigator !== 'undefined' && navigator.modelContext) || null;
+  if (!mc || typeof mc.registerTool !== 'function') {
     return;
   }
 
@@ -56,7 +58,7 @@
   // 1. bridging_cost_analyser
   // ─────────────────────────────────────────────────────────────────────
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'bridging_cost_analyser',
     description:
       'Calculate the total cost of a UK bridging loan across rolled-up, retained, and serviced ' +
@@ -157,7 +159,7 @@
   // 2. development_appraisal
   // ─────────────────────────────────────────────────────────────────────
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'development_appraisal',
     description:
       'Run a UK property development scheme viability appraisal. Models land cost, build cost, ' +
@@ -249,7 +251,7 @@
   // 3. btl_stress_tester
   // ─────────────────────────────────────────────────────────────────────
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'btl_stress_tester',
     description:
       'Run a UK buy-to-let ICR stress test. Calculates current ICR at product and stress rates, ' +
@@ -373,7 +375,7 @@
     { lower: 1500000, upper: null, rate: 12 },
   ];
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'uk_stamp_duty_calculator',
     description:
       'Calculate UK property transaction tax across England/Northern Ireland (SDLT), Scotland (LBTT) ' +
@@ -457,7 +459,7 @@
 
   if (typeof console !== 'undefined' && console.info) {
     console.info(
-      '[FDC WebMCP] Registered 4 tools via navigator.modelContext: ' +
+      '[FDC WebMCP] Registered 4 tools via modelContext: ' +
         'bridging_cost_analyser, development_appraisal, btl_stress_tester, uk_stamp_duty_calculator. ' +
         'See https://www.fdcommercial.co.uk/finance-guide/uk-property-finance-mcp-ai-assistants/'
     );
