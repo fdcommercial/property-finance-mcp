@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/fdcommercial-property-finance-mcp-badge.png)](https://mseep.ai/app/fdcommercial-property-finance-mcp)
+
 # FD Commercial Property Finance MCP
 
 Free UK property finance calculators exposed as an MCP (Model Context Protocol) server. Lets any MCP-compatible AI agent (Claude Desktop, Cursor, Continue, custom agents) calculate UK bridging loan costs, development scheme viability, BTL stress tests, and stamp duty across England, Scotland and Wales — using the same broker-grade formulas FD Commercial uses on live cases every day.
